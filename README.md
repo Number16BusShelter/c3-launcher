@@ -139,12 +139,19 @@ docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --keep-running
 The launcher includes parallel, per-node health monitoring:
 
 - Each node gets its own dedicated monitoring thread
+- Adds a 5-second delay after launching each node to allow for initialization
 - Periodically checks each node's health at configurable intervals
-- Counts consecutive failures
-- After 3 consecutive failures, considers a node dead
+- Uses a "3 strikes" approach: initial check + 2 retries before considering a node dead
 - Automatically stops the failed node
 - Launches a replacement node of the same type
 - Provides real-time status updates in the console
+
+Monitoring works as follows:
+1. Initial health check right after the 5-second boot delay
+2. Regular polling based on the configured interval (default: 30 seconds)
+3. If a node fails a check, it gets 2 more chances (consecutive failures)
+4. After 3 consecutive failures, the node is considered dead and replaced
+5. Any successful check resets the failure counter
 
 ## Node Types
 
@@ -181,4 +188,3 @@ Common issues:
 ## License
 
 [MIT License](LICENSE)
-

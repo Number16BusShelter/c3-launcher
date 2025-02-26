@@ -1,22 +1,4 @@
-def stop_all_workloads():
-    """Stop all active workloads and log the results"""
-    logger.info(f"🛑 Stopping all {len(active_nodes)} active workloads...")
-
-    for node_info in active_nodes:
-        node_hostname = node_info.get('node')
-        node_id = node_info.get('workload')
-
-        logger.info(f"🛑 Stopping {node_hostname} (ID: {node_id})...")
-        result = stop_workload(node_id)
-
-        if result:
-            stopped_time = datetime.fromtimestamp(result.get('stopped')).strftime('%Y-%m-%d %H:%M:%S')
-            refund = result.get('refund_amount', 0)
-            logger.info(f"✅ Successfully stopped {node_hostname} at {stopped_time} (Refund: {refund})")
-        else:
-            logger.error(f"❌ Failed to stop {node_hostname}")
-
-    logger.info("✅ All workloads stopped")#!/usr/bin/env python3
+#!/usr/bin/env python3
 import os
 import sys
 import time
@@ -125,13 +107,34 @@ def stop_workload(workload_id):
         return None
 
 
+def stop_all_workloads():
+    """Stop all active workloads and log the results"""
+    logger.info(f"🛑 Stopping all {len(active_nodes)} active workloads...")
+
+    for node_info in active_nodes:
+        node_hostname = node_info.get('node')
+        node_id = node_info.get('workload')
+
+        logger.info(f"🛑 Stopping {node_hostname} (ID: {node_id})...")
+        result = stop_workload(node_id)
+
+        if result:
+            stopped_time = datetime.fromtimestamp(result.get('stopped')).strftime('%Y-%m-%d %H:%M:%S')
+            refund = result.get('refund_amount', 0)
+            logger.info(f"✅ Successfully stopped {node_hostname} at {stopped_time} (Refund: {refund})")
+        else:
+            logger.error(f"❌ Failed to stop {node_hostname}")
+
+    logger.info("✅ All workloads stopped")
+
+
 def check_node_health(node):
     """Check if a node is responding"""
     node_url = f"https://{node}"
     headers = {"X-C3-API-KEY": api_key}
 
     try:
-        response = requests.get(node_url, headers=headers, timeout=10)
+        response = requests.get(node_url, headers=headers, timeout=5)
         return response.status_code == 200
     except (requests.RequestException, Exception) as e:
         logger.warning(f"🔍 Health check failed for {node}: {str(e)}")
@@ -175,9 +178,11 @@ def replace_node(failed_node_info):
 
 def monitor_node(node_info):
     """Monitor a single node in a dedicated thread"""
+    global active_nodes
+
     node_hostname = node_info.get('node')
     node_id = node_info.get('workload')
-    node_type = node_info.get('type', '').replace('ollama_webui:', '')
+    node_type = node_info.get('type', 'unknown')
 
     logger.info(f"🔎 Starting monitoring thread for node {node_hostname} ({node_type})")
 
@@ -186,42 +191,35 @@ def monitor_node(node_info):
     if is_healthy:
         logger.info(f"✅ Node {node_hostname} is up and running")
     else:
-        logger.warning(f"⚠️ Initial health check failed for node {node_hostname}")
-
-    # Track status to only log changes
-    last_status = is_healthy
+        logger.warning(f"⚠️ Initial health check failed for node {node_hostname}, will retry")
 
     while should_monitor and node_info in active_nodes:
-        # Check if the node is healthy
-        is_healthy = check_node_health(node_hostname)
+        # Check if the node is still in workloads response
+        current_workloads = get_running_workloads()
+        workload_ids = [w.get('workload') for w in current_workloads]
 
-        # Status changed from down to up
-        if is_healthy and not last_status:
-            logger.info(f"✅ Node {node_hostname} is now up and responding")
+        if node_id not in workload_ids:
+            logger.warning(f"⚠️ Node {node_hostname} (ID: {node_id}) is no longer in workloads response, considering it removed")
+            # Remove from active nodes
+            active_nodes = [node for node in active_nodes if node.get('workload') != node_id]
+            break
 
-        # Status changed from up to down
-        elif not is_healthy and last_status:
-            logger.warning(f"⚠️ Node {node_hostname} has stopped responding")
-
-        # Update last known status
-        last_status = is_healthy
-
-        if not is_healthy:
-            # Increment failure counter
-            node_failures[node_hostname] = node_failures.get(node_hostname, 0) + 1
-            logger.warning(f"⚠️ Node {node_hostname} health check failed ({node_failures[node_hostname]}/3)")
-
-            # Replace node after 3 failures
-            if node_failures[node_hostname] >= 3:
-                logger.error(f"❌ Node {node_hostname} failed 3 health checks, replacing...")
-                replace_node(node_info)
-                # Exit the thread as this node is replaced
+        # Node is still in workloads, check health with retries
+        is_alive = False
+        for retry in range(3):  # Try up to 3 times (initial + 2 retries)
+            is_healthy = check_node_health(node_hostname)
+            if is_healthy:
+                is_alive = True
                 break
+            else:
+                logger.warning(f"⚠️ Health check failed for {node_hostname} (attempt {retry+1}/3)")
+
+        if not is_alive:
+            logger.error(f"❌ Node {node_hostname} failed all health checks, replacing...")
+            replace_node(node_info)
+            break
         else:
-            # Reset failure counter on successful check
-            if node_hostname in node_failures and node_failures[node_hostname] > 0:
-                logger.info(f"✅ Node {node_hostname} recovered after {node_failures[node_hostname]} failed checks")
-            node_failures[node_hostname] = 0
+            logger.info(f"✅ Node {node_hostname} is healthy")
 
         # Sleep before next check
         time.sleep(WORKLOAD_POLL)
@@ -275,6 +273,10 @@ def launch_nodes(num_nodes=1, keep_running=False, node_type="alternate"):
             successful_launches.append(result)
             logger.info(f"✅ Node {i+1}: {result.get('node')} (ID: {result.get('workload')})")
 
+            # Small delay to allow the node to boot up
+            logger.info(f"⏳ Waiting 5 seconds for node to initialize...")
+            time.sleep(5)
+
             # Initialize failure counter
             node_failures[result.get('node')] = 0
         else:
@@ -286,9 +288,7 @@ def launch_nodes(num_nodes=1, keep_running=False, node_type="alternate"):
     logger.info(f"Successful: {len(successful_launches)} nodes")
 
     for idx, node in enumerate(successful_launches):
-        node_type_str = "unknown"
-        if "type" in node:
-            node_type_str = node["type"].replace("ollama_webui:", "")
+        node_type_str = node.get("type", "unknown")
 
         expiry_time = datetime.fromtimestamp(node.get('expires')).strftime('%Y-%m-%d %H:%M:%S')
         logger.info(f"{idx+1}. {node.get('node')} (Type: {node_type_str}, Expires: {expiry_time})")
