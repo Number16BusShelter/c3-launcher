@@ -47,6 +47,9 @@ active_nodes = []
 node_failures = {}  # Track failure counts per node
 node_threads = {}   # Track monitoring threads per node
 should_monitor = True
+target_node_count = 1  # Default, will be updated from args
+node_type_setting = "alternate"  # Default, will be updated from args
+keep_running = False  # Default, will be updated from args
 
 
 def get_running_workloads():
@@ -141,39 +144,72 @@ def check_node_health(node):
         return False
 
 
-def replace_node(failed_node_info):
-    """Replace a failed node with a new one of the same type"""
-    node_hostname = failed_node_info.get('node')
-    node_id = failed_node_info.get('workload')
-    node_type = failed_node_info.get('type')
+def ensure_target_node_count():
+    """Make sure we have the target number of nodes running"""
+    global active_nodes
 
-    logger.info(f"🔄 Replacing failed node {node_hostname} (ID: {node_id})")
+    # Only ensure target count if keep_running is True
+    if not keep_running:
+        return len(active_nodes)
 
-    # Stop the failed node first
+    current_count = len(active_nodes)
+
+    if current_count < target_node_count:
+        nodes_to_add = target_node_count - current_count
+        logger.info(f"🔄 Current node count ({current_count}) is below target ({target_node_count}). Launching {nodes_to_add} additional nodes...")
+
+        for i in range(nodes_to_add):
+            # Determine node type based on parameter
+            if node_type_setting == "alternate":
+                # Calculate the index as if we're continuing the sequence
+                idx = current_count + i
+                workload_type = "ollama_webui:fast" if idx % 2 == 0 else "ollama_webui:large"
+            else:
+                workload_type = f"ollama_webui:{node_type_setting}"
+
+            logger.info(f"🔄 Launching replacement node {i+1}/{nodes_to_add} ({workload_type})...")
+            result = launch_workload(workload_type=workload_type)
+
+            if result:
+                active_nodes.append(result)
+                logger.info(f"✅ Successfully launched node: {result.get('node')} (ID: {result.get('workload')})")
+
+                # Initialize failure counter
+                node_failures[result.get('node')] = 0
+
+                # Start monitoring the new node
+                start_node_monitoring(result)
+
+                # Small delay to avoid rate limiting
+                time.sleep(2)
+            else:
+                logger.error(f"❌ Failed to launch replacement node")
+
+    return len(active_nodes)
+
+
+def remove_failed_node(node_info):
+    """Remove a failed node from tracking and stop it if possible"""
+    global active_nodes
+
+    node_hostname = node_info.get('node')
+    node_id = node_info.get('workload')
+
+    logger.info(f"🔄 Removing failed node {node_hostname} (ID: {node_id})")
+
+    # Stop the failed node
     stop_result = stop_workload(node_id)
     if stop_result:
         logger.info(f"✅ Successfully stopped failed node {node_hostname}")
     else:
-        logger.warning(f"⚠️ Failed to stop node {node_hostname}, but continuing replacement")
+        logger.warning(f"⚠️ Failed to stop node {node_hostname}, but continuing removal")
 
-    # Launch a new node of the same type
-    new_node = launch_workload(workload_type=node_type)
+    # Remove from active nodes list
+    active_nodes = [node for node in active_nodes if node.get('workload') != node_id]
 
-    if new_node:
-        logger.info(f"✅ Successfully launched replacement node {new_node.get('node')}")
-
-        # Update the active nodes list - remove the old node and add the new one
-        global active_nodes
-        active_nodes = [node for node in active_nodes if node.get('workload') != node_id]
-        active_nodes.append(new_node)
-
-        # Reset failure counter for the new node
-        node_failures[new_node.get('node')] = 0
-
-        # Start monitoring the new node
-        start_node_monitoring(new_node)
-    else:
-        logger.error(f"❌ Failed to launch replacement node")
+    # Ensure we maintain the target node count if keep_running is enabled
+    if keep_running:
+        ensure_target_node_count()
 
 
 def monitor_node(node_info):
@@ -202,6 +238,9 @@ def monitor_node(node_info):
             logger.warning(f"⚠️ Node {node_hostname} (ID: {node_id}) is no longer in workloads response, considering it removed")
             # Remove from active nodes
             active_nodes = [node for node in active_nodes if node.get('workload') != node_id]
+            # Ensure target count if keep_running is enabled
+            if keep_running:
+                ensure_target_node_count()
             break
 
         # Node is still in workloads, check health with retries
@@ -215,8 +254,8 @@ def monitor_node(node_info):
                 logger.warning(f"⚠️ Health check failed for {node_hostname} (attempt {retry+1}/3)")
 
         if not is_alive:
-            logger.error(f"❌ Node {node_hostname} failed all health checks, replacing...")
-            replace_node(node_info)
+            logger.error(f"❌ Node {node_hostname} failed all health checks, removing...")
+            remove_failed_node(node_info)
             break
         else:
             logger.info(f"✅ Node {node_hostname} is healthy")
@@ -247,9 +286,14 @@ def start_node_monitoring(node_info):
     return thread
 
 
-def launch_nodes(num_nodes=1, keep_running=False, node_type="alternate"):
+def launch_nodes(num_nodes=1, keep_nodes_running=False, node_type="alternate"):
     """Launch the specified number of nodes"""
-    global active_nodes
+    global active_nodes, target_node_count, node_type_setting, keep_running
+
+    # Update global settings
+    target_node_count = num_nodes
+    node_type_setting = node_type
+    keep_running = keep_nodes_running
 
     logger.info(f"🚀 Launching {num_nodes} nodes (keep running: {keep_running}, type: {node_type})")
     logger.info(f"📊 Node health polling interval: {WORKLOAD_POLL} seconds")
@@ -300,16 +344,20 @@ def launch_nodes(num_nodes=1, keep_running=False, node_type="alternate"):
     for node_info in active_nodes:
         start_node_monitoring(node_info)
 
+    # If we couldn't launch all requested nodes and keep_running is enabled, try to reach the target count
+    if keep_running and len(successful_launches) < num_nodes:
+        ensure_target_node_count()
+
 
 def main():
     parser = argparse.ArgumentParser(description="Comput3.ai Workload Manager")
     parser.add_argument("--nodes", type=int, default=1, help="Number of nodes to launch (default: 1)")
     parser.add_argument("--runtime", type=int, help="Runtime in seconds (default: 3600)")
-    parser.add_argument("--keep-running", action="store_true", help="Keep nodes running with hourly renewal")
+    parser.add_argument("--keep-running", action="store_true", help="Keep relaunching nodes when they fail or expire")
     parser.add_argument("--poll", type=int, help="Node health check interval in seconds (default: 30)")
     parser.add_argument("--type", type=str, default="alternate", choices=["fast", "large", "alternate"],
                       help="Node type to launch (fast, large, or alternate) (default: alternate)")
-    parser.add_argument("--stop-on-exit", action="store_true", help="Stop all workloads when the script exits")
+    parser.add_argument("--no-rm", action="store_true", help="Keep nodes running after script terminates")
 
     args = parser.parse_args()
 
@@ -341,9 +389,12 @@ def main():
             logger.info(f"Waiting for {hostname} monitoring to complete...")
             thread.join(timeout=2)
 
-        # Stop all workloads if requested
-        if args.stop_on_exit:
+        # Stop all workloads unless --no-rm flag is specified
+        if not args.no_rm:
+            logger.info("Stopping all workloads before exit (use --no-rm to keep them running)")
             stop_all_workloads()
+        else:
+            logger.info("Leaving all workloads running (--no-rm flag is set)")
 
         logger.info("Bye! 👋")
 

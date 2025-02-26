@@ -54,7 +54,7 @@ Run as a background service:
 
 ```bash
 docker run -d --name c3-launcher --restart unless-stopped --env-file ./.env \
-  ghcr.io/comput3ai/c3-launcher:latest --nodes 4 --keep-running
+  ghcr.io/comput3ai/c3-launcher:latest --nodes 4 --keep-running --no-rm
 ```
 
 Run with specific node type:
@@ -67,13 +67,6 @@ docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --nodes 2 --ty
 ```bash
 # Launch all nodes with fast type
 docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --nodes 2 --type fast
-```
-
-Run with auto-cleanup on exit:
-
-```bash
-# Launch nodes and stop them when the script exits (Ctrl+C)
-docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --nodes 2 --stop-on-exit
 ```
 
 ## Docker Usage
@@ -122,10 +115,10 @@ docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --keep-running
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--nodes` | Number of nodes to launch | 1 |
-| `--keep-running` | Keep nodes running with hourly renewal | False |
+| `--keep-running` | Keep relaunching nodes when they fail or expire | False |
 | `--poll` | Node health check interval in seconds | 30 |
 | `--type` | Node type to launch (fast, large, or alternate) | alternate |
-| `--stop-on-exit` | Stop all workloads when the script exits | False |
+| `--no-rm` | Keep nodes running after script terminates | False |
 
 ### Environment Variables
 
@@ -141,17 +134,17 @@ The launcher includes parallel, per-node health monitoring:
 - Each node gets its own dedicated monitoring thread
 - Adds a 5-second delay after launching each node to allow for initialization
 - Periodically checks each node's health at configurable intervals
-- Uses a "3 strikes" approach: initial check + 2 retries before considering a node dead
+- Uses quick health checks with 2 retries (3 checks total) with a 5-second timeout
 - Automatically stops the failed node
-- Launches a replacement node of the same type
+- Launches a replacement node if `--keep-running` is enabled
 - Provides real-time status updates in the console
 
 Monitoring works as follows:
 1. Initial health check right after the 5-second boot delay
 2. Regular polling based on the configured interval (default: 30 seconds)
-3. If a node fails a check, it gets 2 more chances (consecutive failures)
-4. After 3 consecutive failures, the node is considered dead and replaced
-5. Any successful check resets the failure counter
+3. If a node fails a check, it immediately gets 2 more chances (3 total checks)
+4. After 3 consecutive failures, the node is considered dead and is stopped
+5. If `--keep-running` is enabled, a replacement node will be launched
 
 ## Node Types
 
@@ -176,6 +169,12 @@ docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --type fast
 # Alternate between fast and large (default behavior)
 docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --type alternate
 ```
+
+## Flags Explained
+
+- **--keep-running**: Determines if nodes get relaunched when they fail or expire. When enabled, the script will maintain the specified number of nodes by launching new ones as needed.
+
+- **--no-rm**: Determines if nodes keep running after the script terminates. By default, all nodes are stopped when the script exits (Ctrl+C). With this flag, nodes will keep running even after script termination.
 
 ## Troubleshooting
 
