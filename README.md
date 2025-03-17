@@ -61,12 +61,12 @@ Run with specific node type:
 
 ```bash
 # Launch all nodes with large type
-docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --nodes 2 --type large
+docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --nodes 2 --type ollama_webui:large
 ```
 
 ```bash
 # Launch all nodes with fast type
-docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --nodes 2 --type fast
+docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --nodes 2 --type ollama_webui:fast
 ```
 
 ## Docker Usage
@@ -117,7 +117,7 @@ docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --keep-running
 | `--nodes` | Number of nodes to launch | 1 |
 | `--keep-running` | Keep relaunching nodes when they fail or expire | False |
 | `--poll` | Node health check interval in seconds | 30 |
-| `--type` | Node type to launch (fast, large, or alternate) | alternate |
+| `--type` | Node type to launch (currently, ollama_webui:fast or ollama_webui:large) | ollama_webui:fast |
 | `--no-rm` | Keep nodes running after script terminates | False |
 
 ### Environment Variables
@@ -157,17 +157,12 @@ You can specify which type to use with the `--type` parameter:
 
 ```bash
 # Launch only large nodes
-docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --type large
+docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --type ollama_webui:large
 ```
 
 ```bash
 # Launch only fast nodes
-docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --type fast
-```
-
-```bash
-# Alternate between fast and large (default behavior)
-docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --type alternate
+docker run --env-file ./.env ghcr.io/comput3ai/c3-launcher:latest --type ollama_webui:fast
 ```
 
 ## Flags Explained

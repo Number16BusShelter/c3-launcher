@@ -160,12 +160,7 @@ def ensure_target_node_count():
 
         for i in range(nodes_to_add):
             # Determine node type based on parameter
-            if node_type_setting == "alternate":
-                # Calculate the index as if we're continuing the sequence
-                idx = current_count + i
-                workload_type = "ollama_webui:fast" if idx % 2 == 0 else "ollama_webui:large"
-            else:
-                workload_type = f"ollama_webui:{node_type_setting}"
+            workload_type = f"{node_type_setting}"
 
             logger.info(f"🔄 Launching replacement node {i+1}/{nodes_to_add} ({workload_type})...")
             result = launch_workload(workload_type=workload_type)
@@ -305,10 +300,7 @@ def launch_nodes(num_nodes=1, keep_nodes_running=False, node_type="alternate"):
 
     for i in range(num_nodes):
         # Determine node type based on parameter
-        if node_type == "alternate":
-            workload_type = "ollama_webui:fast" if i % 2 == 0 else "ollama_webui:large"
-        else:
-            workload_type = f"ollama_webui:{node_type}"
+        workload_type = f"{node_type}"
 
         logger.info(f"🔄 Launching node {i+1}/{num_nodes} ({workload_type})...")
         result = launch_workload(workload_type=workload_type)
@@ -355,8 +347,8 @@ def main():
     parser.add_argument("--runtime", type=int, help="Runtime in seconds (default: 3600)")
     parser.add_argument("--keep-running", action="store_true", help="Keep relaunching nodes when they fail or expire")
     parser.add_argument("--poll", type=int, help="Node health check interval in seconds (default: 30)")
-    parser.add_argument("--type", type=str, default="alternate", choices=["fast", "large", "alternate"],
-                      help="Node type to launch (fast, large, or alternate) (default: alternate)")
+    parser.add_argument("--type", type=str, default="ollama_webui:fast", choices=["ollama_webui:fast", "ollama_webui:large"],
+                      help="Node type to launch (ollama_webui:fast or ollama_webui:large) (default: ollama_webui:fast)")
     parser.add_argument("--no-rm", action="store_true", help="Keep nodes running after script terminates")
 
     args = parser.parse_args()
