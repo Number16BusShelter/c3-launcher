@@ -1,0 +1,10 @@
+services:
+  c3-launcher:
+    container_name: c3-launcher
+    hostname: c3-launcher
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./.env
